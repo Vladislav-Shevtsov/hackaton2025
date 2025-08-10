@@ -44,7 +44,6 @@ def logi_r(x, y):
 def cat(df, c):
     y = np.array(df["tma_date"])
     x = pd.get_dummies(df[c], drop_first=True, dtype=float)
-    # Удаляем неинформативные столбцы
     x = x.loc[:, x.nunique() > 1]
     print(x.columns)
     return x, y
@@ -55,7 +54,7 @@ for c in nom:
     x, y = cat(df, c)
     logi_r(x, y)
 
-'''
+
 for c in num:
     print(c)
     x = np.array(df[c]).reshape(-1,1)
@@ -64,4 +63,3 @@ for c in num:
     x = x[mask]
     y = y[mask]
     logi_r(x, y)
-'''
