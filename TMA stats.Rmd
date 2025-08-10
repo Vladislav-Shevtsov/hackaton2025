@@ -1,0 +1,739 @@
+---
+title: "Identifying patterns of TMA anaylsis of BMT data from 2018-2025"
+  bookdown::html_document2:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+# bibliography: ref.bib
+# link-citations: yes
+# csl: american-medical-association.csl
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+<!-- **Keywords:** hemophagocytic lymphohistiocytosis; macrophage activation syndrome; hyperferritinemia; sepsis; prognostic risk score; cytokine release syndrome; allogeneic stem cell transplantation; -->
+
+```{r , include=FALSE}
+# R markdown
+library(rmarkdown)
+library(officedown)
+library(officer)
+library(officedown)
+library(flextable)
+library(knitr)
+# Импрот
+library(googlesheets4)
+library(readxl)
+# Обработка данных
+library(dplyr)
+library(reshape2)
+library(stringr)
+library(Hmisc)
+# library(tidyr)
+# library(webshot)
+# Описательная статистика
+library(compareGroups)
+library(gtsummary)
+# Графика
+library(ggplot2)
+library(ggpubr)
+library(patchwork)
+library(ggthemr)
+library(sjPlot)
+# Выживаемость
+library(survminer)
+library(survival)
+library(ggsurvfit)
+library(finalfit)
+library(tidycmprsk)
+library(forestmodel)
+library(DiagrammeR)
+library(cardx)
+library(SurvCens)
+# library(purrr)
+# library(medicaldata)
+# library(caret)
+library(rms)
+
+`%nin%` = Negate(`%in%`)
+
+ggthemr_reset()
+# grsc_theme <- ggthemr('greyscale', set_theme = TRUE)
+
+```
+
+```{r , include=FALSE}
+# Импорт
+googlesheets4::gs4_deauth()
+
+mcl2 <- read_excel("new ready caracterstics.xlsx") %>% 
+  filter(hsct_type != 'HID_M') %>%
+  distinct(id, .keep_all = TRUE)
+  
+
+  
+crea <- read_excel("sch_alt_ast_bil_crea_urea_parsed.xlsx")
+tma_id <- read_excel("id_90.xlsx")
+tma_id$severeTMA <- "severe TMA"
+
+tma_id$id <- tma_id$id_90
+
+suspected_tma_with_date_opp <- read_excel("suspected_tma_with_date_opp.xlsx")
+suspected_tma_with_date_opp$id <- suspected_tma_with_date_opp$patient_id
+
+mcl2 <- mcl2 %>% 
+  left_join(suspected_tma_with_date_opp, by = "id" )
+
+mcl2 <- mcl2 %>% 
+  left_join(tma_id, by = "id" )
+
+
+mcl2$tma_clear <- if_else(!is.na(mcl2$tma_date ), 'severe TMA', 
+                          if_else(!is.na(mcl2$date_opp_after ), "severe TMA", "No TMA"))
+
+
+
+mcl2$tma_clear_date <- if_else(is.na(mcl2$tma_date ), mcl2$date_opp_after, mcl2$tma_date)
+
+openxlsx::write.xlsx(mcl2, "final TMA.xlsx")
+
+
+```
+
+
+
+# Data preparation
+
+```{r , include=FALSE}
+
+mcl2$Prof2 <- as.character(ifelse(mcl2$Prof %in% c("BendaTxMMF", "CyBenda", "CyBendaTxMMF"), "CyBenda", mcl2$Prof))
+mcl2$Prof2 <- as.character(ifelse(mcl2$Prof2 == "Cy", "CyTxMMF", mcl2$Prof2))
+mcl2$Prof2 <- as.character(ifelse(mcl2$Prof2 == "PTcy", "CyTxMMF", mcl2$Prof2))
+mcl2$Prof2 <- as.character(if_else(mcl2$Prof2 %in% c("TimoMtxTx","a-b", 'Csa',  'CsaMMF',  'CsaMtx', 'TxMtx', 'CsaMTX'), "Other", mcl2$Prof2))
+mcl2$Prof2 <- as.character(if_else(is.na(mcl2$Prof2), "Other", mcl2$Prof2))
+
+mcl$agvhd_grade_cl <- if_else(mcl$agvhd_grade > 3, "Severe", 
+                              if_else(is.na(mcl$agvhd_grade), "No/Mild", "No/Mild"))
+
+
+cd3 <- gsub(",", ".", gsub("\\.", "", mcl2$CD3))
+ссф <- data_frame(
+  as.character(cd3),
+  str_extract(cd3, "\\d+\\.*\\d*"),
+  str_extract(cd3, "(х).*"),
+  str_extract(str_extract(cd3, "(х).*"), "8")
+)
+mcl2$cd3 <- ifelse(
+  is.na(ссф$`str_extract(str_extract(cd3, "(х).*"), "8")`),
+  as.numeric(ссф$`str_extract(cd3, "\\\\d+\\\\.*\\\\d*")`),
+  as.numeric(ссф$`str_extract(cd3, "\\\\d+\\\\.*\\\\d*")`) * 10
+)
+mcl2$Prof_GVHD_clear <- mcl2$Prof
+
+mcl <- mcl2 
+
+
+mcl$gradeCRS_cens <- ifelse(
+  as.character(mcl$Grade_CRS) %in% c("1", "2"),
+  "1-2",
+  ifelse(as.character(mcl$Grade_CRS) %in% c("3", "4"), "3-4", "No CRS")
+)
+# mcl$gradeCRS_cens <- factor(mcl$gradeCRS_cens, levels = c("No CRS", "1-2", "3-4"))
+# mcl$crs_clear <- as.factor(ifelse(mcl$gradeCRS_cens == "No CRS", "No CRS", "CRS"))
+# mcl$hsct_groups <- as.factor(ifelse(mcl$hsct_type == "HID", "HID", "MUD/MMUD/MRD"))
+# mcl$CD34 <- as.numeric(as.character(mcl$CD34))
+# mcl$ds_clear<- as.factor(ifelse(mcl$ds_clear == "ОМЛ", "AML", "ALL"))
+# mcl$gender<- as.factor(ifelse(mcl$gender == "Мужской", "Male", "Female"))
+
+# mcl$crsdays <- as.numeric(as.Date(unlist(mcl$crs_date)) - as.Date(mcl$date_hsct))
+# mcl <- filter(mcl, crsdays <= 30 | is.na(crsdays))
+
+mcl$Dead <- as.character(mcl$Dead)
+mcl <- os_cut(mcl$`Дата follow-up`, mcl$date_hsct, mcl$Dead, 1, 365, mcl)
+
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$relapse_date,
+  status = mcl$Dead,
+  cens_time = 1,
+  # для дней,
+  cutoff_time = 365,
+  status_name = "Death",
+  cmprsk_name = "Relapse",
+  data = mcl
+)
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$agvhddate,
+  status = mcl$Dead,
+  cens_time = 1,
+  cutoff_time = 125,
+  status_name = "Death",
+  cmprsk_name = "aGVHD",
+  data = mcl
+)
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$tma_clear_date,
+  status = mcl$Dead,
+  cens_time = 1,
+  cutoff_time = 365,
+  status_name = "Death",
+  cmprsk_name = "severe TMA",
+  data = mcl
+)
+
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$date_ley_recovery,
+  status = mcl$Dead,
+  cens_time = 1,
+  cutoff_time = 50,
+  status_name = "Death",
+  cmprsk_name = "Engraftment",
+  data = mcl
+)
+
+mcl$agvhd24_date <- if_else(mcl$agvhd_grade %in% c("2", "3", "4"), mcl$agvhddate, NA)
+mcl$agvhd34_date <- if_else(mcl$agvhd_grade %in% c("3", "4"), mcl$agvhddate, NA)
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$agvhd34_date,
+  status = mcl$Dead,
+  cens_time = 1,
+  cutoff_time = 125,
+  status_name = "Death",
+  cmprsk_name = "aGVHD34",
+  data = mcl
+)
+
+mcl <- cmprsk_cut(
+  date_end = mcl$`Дата follow-up`,
+  date_start = mcl$date_hsct,
+  cmprsk_date = mcl$agvhd24_date,
+  status = mcl$Dead,
+  cens_time = 1,
+  cutoff_time = 125,
+  status_name = "Death",
+  cmprsk_name = "aGVHD24",
+  data = mcl
+)
+
+mcl <- os_cut(mcl$`Дата follow-up`, mcl$mas_date, mcl$Dead, 1, 60, mcl)
+
+mcl <- tibble::as_tibble(mcl, .name_repair = "unique")
+
+
+
+
+mcl <- mcl %>%                                   # ваш дата-фрейм
+  mutate(
+    ds_clear = recode(ds_clear,                  # diagnosis — колонка с русскими аббрев.
+      "АА"   = "Aplastic anemia",                # апластическая анемия
+      "аХМЛ" = "Atypical CML",                   # атипичный ХМЛ
+      "Другое"= "PMF",                         # прочие диагнозы
+      "МДС"  = "MDS",                            # myelodysplastic syndrome
+      "МФ"   = "PMF",                             # myelofibrosis
+      "ОЛЛ"  = "ALL",                            # acute lymphoblastic leukemia
+      "ОМЛ"  = "AML",                            # acute myeloid leukemia
+      "ПМФ"  = "PMF",                            # primary myelofibrosis
+      "ХЛЛ"  = "CLL",                            # chronic lymphocytic leukemia
+      "ХМЛ"  = "CML"                             # chronic myeloid leukemia
+    )
+  )
+
+
+```
+
+# Discriptive stats
+
+## General
+
+
+```{r echo=FALSE, warning=FALSE, message = FALSE, tab.cap="Baseline characteristics of patients with TMA vs  ", tab.id = "char_crs", tab.cap.location = "bottom"}
+
+
+
+
+var.labels = c(Age="Age in years (median, range)", 
+               Gender="Gender n(%)",
+               Disease  = 'Disease, n(%)',             
+               Origin = 'Graft source, n(%)',
+               Cond = 'Conditioning intensity, n(%)',
+               Prof2 = "GVHD prophylaxis",
+               CRSgrade = 'CRS grade, n(%)',
+               agvhd_grade_cl = 'aGVHD grade, n(%)',
+               # Hscore = 'Hscore, n(%)',
+               tma = "TMA, n(%)",
+               status = 'Disease status, n(%)',
+               # Risk = 'Risk group, n(%)',
+               mas_time = 'Time from HCTto MAS (median, range)',
+               CD34="CD34 cell dose, (median, range)", 
+               CD3="CD3 cell dose, (median, range)",
+               NC  = "NC cell dose, (median, range)",            
+               Origin = 'Graft source, n(%)',
+               HLA = 'HLA compatibility n(%)',
+               crs_clear = 'Early CRS grade, n(%)',
+               HSCT = 'Donor type n(%)'
+               )
+
+yf <- data.frame(
+  Gender = as.factor(mcl$gender),
+  Age = as.numeric(mcl$age),
+  Disease = as.factor(mcl$ds_clear),
+  Cond = as.factor(mcl$RIC_MAC.x),
+  Prof2 = as.factor(mcl$Prof2),
+  agvhd_grade_cl = as.factor(mcl$agvhd_grade_cl),
+  status = (as.character(mcl$status_before_hsct)),
+  mas_time = as.numeric(mcl$mas_time),
+  tma = as.factor(mcl$tma_clear),
+  Origin = as.factor(mcl$origin),
+  CD34 = as.numeric(mcl$CD34),
+  NC = as.numeric(as.character(mcl$NC)),
+  HSCT = as.character(mcl$hsct_type)
+)
+
+
+label(yf) = as.list(var.labels[match(names(yf), names(var.labels))])
+
+
+
+res_all_transp <- descrTable(
+  tma ~ .,
+  data = yf,
+  simplify = TRUE,
+  method = 2,
+  Q1 = 0,
+  Q3 = 1,
+  show.all = TRUE
+  )
+ 
+
+export2word(
+  res_all_transp, file = "x.docx"
+  # strip = TRUE,
+  # first.strip = TRUE,
+  # which.table = "descr",
+  # caption_position  = "bottom" ,
+  # format = "markdown",
+  # landscape = TRUE
+)  
+
+
+
+```
+
+
+## Lab for TMA
+
+```{r echo=FALSE, warning=FALSE, message = FALSE, tab.cap="Lab data charactersitics of patients who developed tma, tab.cap.style = "Table Caption", , tab.id = "hscore_crs"}
+
+
+crea$id <- crea$`Рег.№`
+
+new <- right_join(mcl, crea, by = 'id' ) %>% 
+    filter(!is.na(tma_clear_date))
+
+  
+
+library(tidyr)
+
+lab_wide <- new %>%
+  # filter(!is.na(tma_clear_date)) %>%
+  select(id, tma_clear_date, `Дата забора`, Синоним, Результаты.y) %>%
+  mutate(
+    days_from_tma = as.numeric(as.Date(`Дата забора`) - as.Date(tma_clear_date)),
+    value_num = suppressWarnings(as.numeric(gsub(",", ".", as.character(Результаты.y))))
+  ) %>%
+  filter(between(days_from_tma, -7L, 7L)) %>%
+  group_by(id ,Синоним) %>%
+  summarise(max_value = max(value_num, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from = Синоним,
+    values_from = max_value
+  )
+
+
+res_all_transp <- descrTable(
+   ~ .,
+  data = lab_wide,
+  simplify = TRUE,
+  method = 2,
+  Q1 = 0,
+  Q3 = 1,
+  show.all = TRUE
+  
+  )
+
+export2md(
+  res_all_transp,
+  # strip = TRUE,
+  # first.strip = TRUE,
+  which.table = "descr",
+  format = "markdown",
+  landscape = TRUE
+)
+
+
+
+```
+
+## Lab prior HSCT (compare)
+
+```{r echo=FALSE, warning=FALSE, message = FALSE, tab.cap="Lab base line charactersitics", tab.cap.style = "Table Caption", , tab.id = "hscore_crs"}
+
+crea$id <- crea$`Рег.№`
+
+new <- right_join(mcl, crea, by = 'id' ) 
+
+
+library(tidyr)
+
+lab_wide <- new %>%
+  # filter(!is.na(tma_date)) %>%
+  select(id, tma_clear_date, date_hsct,`Дата забора`, Синоним, Результаты.y) %>%
+  mutate(
+    days_from_tma = as.numeric(as.Date(`Дата забора`) - as.Date(date_hsct)),
+    value_num = suppressWarnings(as.numeric(gsub(",", ".", as.character(Результаты.y))))
+  ) %>%
+  filter(between(days_from_tma, -7L, 1L)) %>%
+  group_by(id, tma_clear_date, Синоним) %>%
+  summarise(max_value = max(value_num, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from = Синоним,
+    values_from = max_value
+  )
+
+lab_wide$tma <-  as.numeric(!is.na(lab_wide$tma_clear_date))
+
+
+res_all_transp <- descrTable(
+  tma ~ .,
+  data = lab_wide,
+  simplify = TRUE,
+  method = 2,
+  Q1 = 0,
+  Q3 = 1,
+  show.all = TRUE
+  
+  )
+
+export2md(
+  res_all_transp,
+  # strip = TRUE,
+  # first.strip = TRUE,
+  which.table = "descr",
+  format = "markdown",
+  landscape = TRUE
+)
+
+
+
+```
+
+
+## HSCT outcomes
+
+```{r echo=FALSE, warning=FALSE, fig.width= 9, fig.height= 8, message = FALSE, fig.cap= "Early post-transplant outcomes in whole population."}
+
+options("ggsurvfit.switch-color-linetype" = FALSE)
+mcl$tma <-  as.numeric(!is.na(mcl$tma_date))
+
+cm.tma.crs <- cuminc(Surv(`severe TMA_time_365`, `severe TMA_status_365`) ~ 1, data = mcl)
+
+cm.gvhd34.crs <- cuminc(Surv(aGVHD34_time_125, aGVHD34_status_125) ~ tma_clear, data = mcl)
+cm.eng.crs<- cuminc(Surv(Engraftment_time_50, Engraftment_status_50) ~ tma_clear, data = mcl)
+cm.nrm.crs <- cuminc(Surv(Relapse_time_365, Relapse_status_365) ~ tma_clear, data = mcl)
+
+os_text <- survfit(Surv(as.numeric(os_time_365), os_status_365 == 1) ~ tma_clear, data = mcl, conf.type = "log-log")  %>%
+  tbl_survfit(times = c(365), label_header = "**SURVIVAL**") %>%
+  add_n()
+
+
+
+agvhd_text <- cuminc(Surv(aGVHD34_time_125, aGVHD34_status_125) ~ tma_clear, data = mcl)  %>%
+  tbl_cuminc(times = c(125), outcomes = c("aGVHD34"), label_header = "**aGVHD3-4**") %>%
+  add_n()
+
+eng_text <- cuminc(Surv(Engraftment_time_50, Engraftment_status_50) ~ tma_clear, data = mcl)  %>%
+  tbl_cuminc(times = c(30), outcomes = c("Engraftment"), label_header = "**ENGRAFTMENT**") %>%
+  add_n()
+
+nrm_text <- cuminc(Surv(Relapse_time_365, Relapse_status_365) ~ tma_clear, data = mcl)  %>%
+  tbl_cuminc(times = c(365), outcomes = c("Death"), label_header = "**NRM**") %>%
+  add_n()
+
+tma_text <- cuminc(Surv(`severe TMA_time_365`, `severe TMA_status_365`) ~ 1, data = mcl)  %>%
+  tbl_cuminc(times = c(365), outcomes = c("severe TMA"), label_header = "**severe TMA**") %>%
+  add_n()
+
+tma_text2 <- cuminc(Surv(`severe TMA_time_365`, `severe TMA_status_365`) ~ 1, data = mcl)  %>%
+  tbl_cuminc(times = c(365), outcomes = c("Death"), label_header = "**severe TMA**") %>%
+  add_n()
+
+
+mcl$tma_time <- as.Date(mcl$tma_clear_date) - as.Date(mcl$date_hsct)
+
+
+
+km.os <- survfit2(Surv(as.numeric(os_time_365), os_status_365 == 1) ~ tma_clear, data = mcl, conf.type = "log-log")
+
+mcl$tma_status_clear <- if_else(!is.na(mcl$tma_clear_date), 1, 0)
+
+mcl$os_status_365 <- as.numeric(if_else(is.na(mcl$os_status_365),"0", mcl$os_status_365))
+mcl$os_time_365 <- if_else(is.na(mcl$os_time_365), 365, mcl$os_time_365)
+mcl$os_time_365 <- if_else(mcl$os_time_365 == 0, 1, mcl$os_time_365)
+ 
+td_dat <- tmerge(
+    data1 = mcl %>% select(id, os_time_365, os_status_365), 
+    data2 = mcl %>% select(id, os_time_365, os_status_365, tma_time, tma_status_clear), 
+    id = id, 
+    death = event(os_time_365, os_status_365),
+    tma = tdc(tma_time)
+    )
+
+coxph(
+  Surv(time = tstart, time2 = tstop, event = death) ~ tma, 
+  data = td_dat
+  ) %>% 
+  tbl_regression(exp = TRUE)
+
+library(ggdark)
+cm.tma.crs <- cuminc(Surv(`severe TMA_time_365`, `severe TMA_status_365`) ~ 1, data = mcl) 
+
+tma_plot_ctm <- cm.tma.crs %>% 
+  ggcuminc(outcome = c("severe TMA", "Death"), size = 1) + # выбираем что будем отображать
+  add_censor_mark( size = 1) +
+  add_confidence_interval()+
+  add_risktable(risktable_stats = c("n.risk"),
+                risktable_group = c( "auto")) +
+  ylim(c(0, 1)) + 
+  annotate("text", x = 0, y = 0.9, hjust = 0, label = paste0("Severe TMA: ", tma_text$table_body$stat_1)) +
+  annotate("text", x = 0, y = 0.85, hjust = 0, label = paste0("Death: ",tma_text2$table_body$stat_1)) +
+  scale_color_manual(values = c("purple",  "lightgreen")) +
+  scale_fill_manual(values = c("purple", "lightgreen")) +
+
+  add_risktable_strata_symbol()+
+  theme_survminer()
+
+os_plot <- ggsurvfit(km.os, size = 0.8)+
+  add_censor_mark() +
+  add_risktable(risktable_stats = c("n.risk"),
+                risktable_group = c( "auto")) +
+  ylim(c(0, 1)) +
+  annotate("text", x = 0, y = 0.9, hjust = 0, label = paste0(tma_text$table_body$stat_1)) +
+  add_risktable_strata_symbol()+
+  theme_survminer() 
+
+
+
+
+nrm_plot_ctm <- cm.nrm.crs %>% 
+  ggcuminc(outcome = c("Death"), size = 0.8) + # выбираем что будем отображать
+  add_censor_mark() +
+  add_risktable(risktable_stats = c("n.risk"),
+                risktable_group = c( "auto")) +
+  ylim(c(0, 1)) + 
+  annotate("text", x = 0, y = 0.9, hjust = 0, label = paste0(tma_text$table_body$stat_1)) +
+  add_risktable_strata_symbol()+
+
+  theme_survminer() 
+  
+
+# график
+a34_plot_ctm <- cm.gvhd34.crs %>% 
+  ggcuminc(outcome = c("aGVHD34"), size = 0.8) + # выбираем что будем отображать
+  add_censor_mark() +
+  add_risktable(risktable_stats = c("n.risk"),
+                risktable_group = c( "auto")) +
+  ylim(c(0, 1)) + 
+  add_risktable_strata_symbol()+
+
+  theme_survminer()  + theme(legend.position="none") 
+
+
+
+
+# график
+eng_plot_ctm <- cm.eng.crs %>%
+  ggcuminc(outcome = c("Engraftment"), size = 0.8) + # выбираем что будем отображать
+  add_censor_mark() +
+  add_pvalue()+
+  add_risktable(risktable_stats = c("n.risk"),
+                risktable_group = c( "auto")) +
+  ylim(c(0, 1)) +
+  labs( x = "Days", colour="CRS" , fill = "CRS", size = 0.1, title = "D | Engraftment") +
+  add_risktable_strata_symbol()+
+  theme_survminer() + theme(legend.position="none") 
+
+built_os <- ggsurvfit_build(os_plot) |> patchwork::wrap_plots()
+built_a34_ctm <- ggsurvfit_build(a34_plot_ctm) |> patchwork::wrap_plots()
+built_nrm_ctm <- ggsurvfit_build(nrm_plot_ctm) |> patchwork::wrap_plots()
+built_eng_ctm <- ggsurvfit_build(eng_plot_ctm) |> patchwork::wrap_plots()
+
+built_os + built_a34_ctm + built_nrm_ctm + built_eng_ctm
+
+
+
+
+```
+
+## TMA outcomes
+
+```{r echo=FALSE, warning=FALSE, fig.width= 9, fig.height= 8, message = FALSE, fig.cap= "Early post-transplant outcomes in whole population."}
+
+
+mcl$tma_time_os <- as.Date(mcl$tma_clear_date) - as.Date(mcl$date_hsct)
+
+mcl <- os_cut(mcl$`Дата follow-up`, mcl$tma_clear_date, mcl$Dead, 1, 100, mcl)
+
+mcl$os_status_100
+mcl$os_time_100 <- if_else(mcl$os_time_100 < 4 , 30, mcl$os_time_100)
+km.os <- survfit2(Surv(as.numeric(os_time_100), os_status_100 == 1) ~ !is.na(tma_date), data = mcl, conf.type = "log-log")
+
+
+mcl$tma_b <- is.na(mcl$tma_date)
+
+summary(mcl$tma_date)
+
+table(!is.na(mcl$tma_date))
+table(mcl$tma_clear)
+
+os_plot <- ggsurvfit(km.os, size = 0.8)+
+  add_censor_mark() +
+  add_confidence_interval()+
+  # add_risktable(risktable_stats = c("n.risk"),
+  #               risktable_group = c( "auto")) +
+  ylim(c(0, 1)) +
+  add_pvalue()+
+  # annotate("text", x = 0, y = 0.9, hjust = 0, label = paste0(tma_text$table_body$stat_1)) +
+
+  # labs( x = "Days", colour="CRS" , fill = "CRS", size = 0.1, title = "A | Overall survival") +
+  scale_color_manual(labels = c( "Identified (New Cases)", "Verified (Diagnosed)"), values = c( "purple",  'lightgreen')) +
+  scale_fill_manual(labels = c("Identified (New Cases)", "Verified (Diagnosed)"), values = c( "purple",  'lightgreen')) +
+  # add_risktable_strata_symbol() +
+  # annotate("text", x = 0, y = 0.1, hjust = 0, label = paste0(os_text$table_body$stat_1)) +
+  theme_survminer() 
+
+
+
+
+
+```
+
+
+## TMA out
+
+```{r echo=FALSE, warning=FALSE, fig.width= 7, fig.height= 5, message = FALSE, tab.cap = "Univariable and multivariable Cox regression identifying predictors of 60-day all-cause mortality after post-transplant sHLH/MAS.Values are hazard ratios (HR) with 95 % confidence intervals and P-values. “–” denotes the reference category for each variable. Abbreviations: AD – active disease at transplantation; Rem – complete remission; CyBenda/CyRuxo/CyTxMMF – cyclophosphamide-based GVHD prophylaxis regimens (see Methods); HID – haploidentical related donor; MMUD – mismatched unrelated donor; MRD – matched related donor; MUD – matched unrelated donor.", tab.id = "surv_tab"}
+
+cm.tma.crs <- cuminc(Surv(`severe TMA_time_365`, `severe TMA_status_365`) ~ 1, data = mcl)
+
+mcl$status_tma_cox <- as.numeric(if_else(mcl$`severe TMA_status_365` == "Death" , "0" ,
+                              if_else(mcl$`severe TMA_status_365` == "severe TMA" , "1" , mcl$`severe TMA_status_365`)))
+
+
+mcl$SurvObj <- with(mcl, Surv( time_tma_cox, status_tma_cox))
+
+km.os <- survfit2(SurvObj ~ 1, data = mcl, conf.type = "log-log")
+
+
+
+yf <- data.frame(
+  Gender = as.factor(mcl$gender),
+  Age = as.numeric(mcl$age),
+  Disease = as.factor(mcl$ds_clear),
+  Cond = as.factor(mcl$RIC_MAC.x),
+  Prof2 = as.factor(mcl$Prof2),
+  agvhd_grade_cl = as.factor(mcl$agvhd_grade_cl),
+  status = (as.character(mcl$status_before_hsct)),
+  mas_time = as.numeric(mcl$mas_time),
+  tma = as.factor(mcl$tma_clear),
+  Origin = as.factor(mcl$origin),
+  CD34 = as.numeric(mcl$CD34),
+  NC = as.numeric(as.character(mcl$NC)),
+  HSCT = as.character(mcl$hsct_type)
+  # `CRS status`= as.factor(as.character(mcl$crs_clear)),
+)
+
+
+
+
+
+explanatory = c("status_before_hsct",
+                "age",
+                'Prof2',
+                "hsct_type",
+                'treatment',
+                "blood_infection_cl"
+                )
+
+ds_clear <- if_else
+
+# explanatory = nice_labels
+explanatory2 = c("mas_sepsis_cl",'Ferritin_cl')
+
+dependent = "Surv( time_tma_cox, status_tma_cox)"
+
+mcl$NC <- as.numeric(mcl$NC)
+
+
+mcl$time_tma_cox <- if_else(is.na(mcl$time_tma_cox), 365, mcl$time_tma_cox)
+mcl$status_tma_cox <- if_else(is.na(mcl$status_tma_cox), 0, mcl$status_tma_cox)
+mcl$RIC_MAC.x <- if_else(is.na(mcl$RIC_MAC.x), "RIC", mcl$RIC_MAC.x)
+
+mcl$Prophylaxis <- mcl$Prof2 
+mcl$Donor <- mcl$hsct_type
+
+library(StepReg)
+f =   Surv(time_tma_cox, status_tma_cox ) ~ gender  + age  + Prof2 + origin  + hsct_type + RIC_MAC.x
+
+s_cox <- stepwise(f,
+  mcl,
+  type = "cox",
+  strategy = "backward", 
+  metric = "AICc",
+  test_method_cox = "exact"
+)
+
+z <- coxph(Surv(time_tma_cox, status_tma_cox) ~  Prophylaxis + Donor  , mcl, x = TRUE, y = TRUE)
+
+forest_model(z)
+
+library(forestmodel)
+summary(s_cox)   
+
+
+
+# If StepReg object:
+fit <- s_cox$backward$AICc   # or s_cox$best_model if present
+
+uv_tbl <- mcl %>% 
+  finalfit(dependent, explanatory ,  keep_models = FALSE ) 
+
+names(uv_tbl)[1] <- "Variable"        # первый столбец — названия
+uv_tbl$Variable <- nice_labels[uv_tbl$Variable]
+
+```
+
+
+
+
+
+```{r echo=FALSE, warning=FALSE, fig.width= 7, fig.height= 5, message = FALSE, tab.cap = "Univariable and multivariable Cox regression identifying predictors of 60-day all-cause mortality after post-transplant sHLH/MAS.Values are hazard ratios (HR) with 95 % confidence intervals and P-values. “–” denotes the reference category for each variable. Abbreviations: AD – active disease at transplantation; Rem – complete remission; CyBenda/CyRuxo/CyTxMMF – cyclophosphamide-based GVHD prophylaxis regimens (see Methods); HID – haploidentical related donor; MMUD – mismatched unrelated donor; MRD – matched related donor; MUD – matched unrelated donor.", tab.id = "surv_tab"}
+```
+
+# References
